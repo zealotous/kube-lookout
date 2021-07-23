@@ -1,3 +1,4 @@
+import logging
 import os
 from copy import copy
 
@@ -78,39 +79,46 @@ class KubeLookout:
         metadata = deployment.metadata
         deployment_key = f"{metadata.namespace}/{metadata.name}"
 
-        ready_replicas = 0
-        if deployment.status.ready_replicas is not None:
-            ready_replicas = deployment.status.ready_replicas
+        status = deployment.status
+        ready_replicas = status.ready_replicas or 0
 
-        if deployment_key not in self.rollouts and \
-                deployment.status.updated_replicas is None:
-            blocks = self._generate_deployment_rollout_block(deployment)
-            resp = self._send_slack_block(blocks, self.slack_channel)
-            self.rollouts[deployment_key] = resp
+        if deployment_key not in self.rollouts and status.updated_replicas is None:
+            logging.error(f'Rolling out deployment {deployment_key}')
+            # blocks = self._generate_deployment_rollout_block(deployment)
+            # resp = self._send_slack_block(blocks, self.slack_channel)
+            self.rollouts[deployment_key] = True
 
         elif deployment_key in self.rollouts:
             rollout_complete = (
-                    deployment.status.updated_replicas ==
-                    deployment.status.replicas ==
-                    ready_replicas)
-            blocks = self._generate_deployment_rollout_block(deployment,
-                                                             rollout_complete)
-            self.rollouts[deployment_key] = self._send_slack_block(
-                channel=self.rollouts[deployment_key][1],
-                message_id=self.rollouts[deployment_key][0], blocks=blocks)
+                status.updated_replicas == status.replicas == ready_replicas
+            )
+            # blocks = self._generate_deployment_rollout_block(
+            #     deployment, rollout_complete
+            # )
+            # message_id, channel = self.rollouts[deployment_key]
+            # self.rollouts[deployment_key] = self._send_slack_block(
+            #     channel=channel, message_id=message_id, blocks=blocks
+            # )
 
             if rollout_complete:
+                # self.core.list_namespaced_replica_set()
                 self.rollouts.pop(deployment_key)
+                logging.error(f'Rollout complete {deployment_key}')
+            else:
+                logging.error(f'Rollout in-progress {deployment_key}')
+
         elif ready_replicas < deployment.spec.replicas:
-            blocks = self._generate_deployment_degraded_block(deployment)
-            self._send_slack_block(blocks, self.slack_channel)
-            self.degraded.add(deployment_key)
+            logging.error(f'Degradation {deployment_key}')
+            # blocks = self._generate_deployment_degraded_block(deployment)
+            # self._send_slack_block(blocks, self.slack_channel)
+            # self.degraded.add(deployment_key)
 
         elif (deployment_key in self.degraded and
               ready_replicas >= deployment.spec.replicas):
-            self.degraded.remove(deployment_key)
-            blocks = self._generate_deployment_not_degraded_block(deployment)
-            self._send_slack_block(blocks, self.slack_channel)
+            logging.error(f'No degradation {deployment_key}')
+            # self.degraded.remove(deployment_key)
+            # blocks = self._generate_deployment_not_degraded_block(deployment)
+            # self._send_slack_block(blocks, self.slack_channel)
 
     def _handle_event(self, deployment):
         self._handle_deployment_change(deployment)
@@ -152,8 +160,7 @@ class KubeLookout:
         block[1]['text']['text'] = message
         block[1]['accessory']['image_url'] = self.progress_image
         if rollout_complete:
-            block[1]['accessory'][
-                'image_url'] = self.ok_image
+            block[1]['accessory']['image_url'] = self.ok_image
         return block
 
     def _generate_deployment_degraded_block(self, deployment):
@@ -174,8 +181,7 @@ class KubeLookout:
 
         block[0]['text']['text'] = header
         block[1]['text']['text'] = message
-        block[1]['accessory'][
-            'image_url'] = self.warning_image
+        block[1]['accessory']['image_url'] = self.warning_image
 
         return block
 
@@ -197,8 +203,7 @@ class KubeLookout:
 
         block[0]['text']['text'] = header
         block[1]['text']['text'] = message
-        block[1]['accessory'][
-            'image_url'] = self.ok_image
+        block[1]['accessory']['image_url'] = self.ok_image
 
         return block
 
